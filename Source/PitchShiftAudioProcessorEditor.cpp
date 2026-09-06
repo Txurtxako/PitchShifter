@@ -316,7 +316,7 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setColour (juce::Colour (0xff94a3b8));
     g.setFont (juce::Font (11.0f, juce::Font::bold));
-    g.drawText ("GUITAR & BASS TRANSPOSER  •  ZERO LATENCY DSP", 165, 17, 350, 20, juce::Justification::centredLeft);
+    g.drawText ("GUITAR & BASS TRANSPOSER ZERO LATENCY", 165, 17, 350, 20, juce::Justification::centredLeft);
 
     // 3. Pantalla OLED Central (x: 24, y: 50, w: 732, h: 105)
     juce::Rectangle<float> oledRect (24.0f, 50.0f, 732.0f, 105.0f);
@@ -411,7 +411,7 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
 
         g.setColour (juce::Colour (0xff10b981));
         g.setFont (juce::Font (11.0f, juce::Font::bold));
-        g.drawText ("EFECTO ACTIVO (ENGAGED)", 240, 444, 300, 16, juce::Justification::centred);
+        g.drawText ("EFECTO ACTIVO", 240, 444, 300, 16, juce::Justification::centred);
     }
     else
     {
@@ -422,7 +422,7 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
 
         g.setColour (juce::Colour (0xffef4444));
         g.setFont (juce::Font (11.0f, juce::Font::bold));
-        g.drawText ("BYPASS (DIRECTO)", 240, 444, 300, 16, juce::Justification::centred);
+        g.drawText ("BYPASS", 240, 444, 300, 16, juce::Justification::centred);
     }
 
     g.setColour (juce::Colour (0xff64748b));
@@ -431,7 +431,7 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setColour (juce::Colour (0xff475569));
     g.setFont (juce::Font (10.0f, juce::Font::plain));
-    g.drawText ("AUDIOCRAFT DSP • VST3 / STANDALONE", 500, 520, 240, 16, juce::Justification::centredRight);
+    g.drawText ("XAINA DSP", 500, 520, 240, 16, juce::Justification::centredRight);
 }
 
 void PitchShiftAudioProcessorEditor::resized()
