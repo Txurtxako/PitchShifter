@@ -1,0 +1,28 @@
+GUIA PASO A PASO PARA COMPILAR EN GITHUB (100% GRATIS)
+=====================================================
+
+Si tuviste problemas al compilar en GitHub, sigue estos 3 pasos:
+
+1. POR QUE SUELE FALLAR:
+   En Windows y Mac, las carpetas que empiezan por punto (".github")
+   estan OCULTAS. Al arrastrar los archivos a GitHub.com, esa carpeta
+   no se sube y GitHub no sabe que tiene que compilar.
+
+2. SOLUCION EN 30 SEGUNDOS (DESDE LA WEB DE GITHUB):
+   a) Ve a tu repositorio en GitHub.com
+   b) Haz clic en "Add file" -> "Create new file"
+   c) En el nombre del archivo escribe:
+      .github/workflows/build-vst3.yml
+      (GitHub creara las subcarpetas automaticamente al escribir las barras)
+   d) Abre el archivo "build-vst3.yml" que viene en este ZIP, copia
+      todo su texto y pegalo en GitHub.
+   e) Haz clic abajo en el boton verde "Commit changes...".
+
+3. DESCARGAR EL PLUGIN YA COMPILADO:
+   a) Ve a la pestana "Actions" en tu repositorio.
+   b) Veras el proceso "Build VST3 Plugins" con una rueda girando (~2 min).
+   c) Cuando termine con tick verde, entra en el proceso.
+   d) Abajo del todo en "Artifacts" descarga:
+      - PitchShift_Windows_x64_VST3 (para tu PC)
+      - PitchShift_macOS_Universal_VST3 (para Mac)
+      - PitchShift_Linux_x64_VST3 (para Linux)

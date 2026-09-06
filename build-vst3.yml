@@ -1,0 +1,73 @@
+name: Build VST3 Plugins
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build on ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows (x64)
+            os: windows-latest
+            artifact_name: PitchShift_Windows_x64_VST3
+          - name: macOS (Universal M1/M2/Intel)
+            os: macos-latest
+            artifact_name: PitchShift_macOS_Universal_VST3
+          - name: Linux (x64)
+            os: ubuntu-latest
+            artifact_name: PitchShift_Linux_x64_VST3
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Detect project files location
+        id: locate-project
+        shell: bash
+        run: |
+          echo "=== Verificando estructura del repositorio ==="
+          ls -la
+          # Buscar CMakeLists.txt excluyendo carpetas temporales de compilación
+          FOUND_PATH=$(find . -name "CMakeLists.txt" -not -path "*/build/*" | head -n 1)
+          if [ -z "$FOUND_PATH" ]; then
+            echo "::error title=CMakeLists.txt no encontrado::No se ha encontrado el archivo CMakeLists.txt en el repositorio. Asegurate de subir todos los archivos del proyecto (CMakeLists.txt y la carpeta Source/)."
+            echo ""
+            echo "ERROR EXPLICADO:"
+            echo "El repositorio contiene el workflow pero falta el archivo CMakeLists.txt y la carpeta Source."
+            echo "Por favor arrastra o sube los archivos descomprimidos del ZIP a tu repositorio."
+            exit 1
+          fi
+          SRC_DIR=$(dirname "$FOUND_PATH")
+          echo "CMakeLists.txt localizado en: $SRC_DIR"
+          echo "source_dir=$SRC_DIR" >> $GITHUB_OUTPUT
+
+      - name: Install Linux audio dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libjack-jackd2-dev             ladspa-sdk libfreetype6-dev             libx11-dev libxcomposite-dev libxcursor-dev             libxext-dev libxinerama-dev libxrandr-dev libxrender-dev             mesa-common-dev libgl1-mesa-dev
+
+      - name: Configure CMake
+        run: cmake -B build -S "${{ steps.locate-project.outputs.source_dir }}" -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build VST3 plugin
+        run: cmake --build build --config Release --parallel
+
+      - name: Upload Compiled VST3 Plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            build/**/*.vst3
+            build/**/VST3
+          if-no-files-found: warn
