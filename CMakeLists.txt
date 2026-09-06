@@ -33,6 +33,8 @@ target_sources(PitchShiftVST3
     PRIVATE
         Source/PitchShiftAudioProcessor.h
         Source/PitchShiftAudioProcessor.cpp
+        Source/PitchShiftAudioProcessorEditor.h
+        Source/PitchShiftAudioProcessorEditor.cpp
 )
 
 target_compile_definitions(PitchShiftVST3
@@ -46,6 +48,8 @@ target_link_libraries(PitchShiftVST3
     PRIVATE
         juce::juce_audio_utils
         juce::juce_audio_processors
+        juce::juce_gui_basics
+        juce::juce_gui_extra
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags

@@ -1,4 +1,5 @@
 #include "PitchShiftAudioProcessor.h"
+#include "PitchShiftAudioProcessorEditor.h"
 
 PitchShiftAudioProcessor::PitchShiftAudioProcessor()
     : AudioProcessor (BusesProperties().withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
@@ -226,7 +227,7 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
 
 juce::AudioProcessorEditor* PitchShiftAudioProcessor::createEditor()
 {
-    return new juce::GenericAudioProcessorEditor (*this);
+    return new PitchShiftAudioProcessorEditor (*this);
 }
 
 bool PitchShiftAudioProcessor::hasEditor() const { return true; }
