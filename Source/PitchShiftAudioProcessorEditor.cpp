@@ -66,13 +66,13 @@ void CustomPedalLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, 
     g.strokePath (bgArc, juce::PathStrokeType (4.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
     // Color temático según el control
-    juce::Colour arcCol = juce::Colour (0xfff59e0b); // Ámbar semitonos
-    if (slider.getName() == "cents" || slider.getName() == "tight")
+    juce::Colour arcCol = juce::Colour (0xfff59e0b); // Ámbar
+    if (slider.getName() == "cents" || slider.getName() == "tight" || slider.getName() == "lowCut")
         arcCol = juce::Colour (0xff06b6d4); // Cian
-    else if (slider.getName() == "mix")
+    else if (slider.getName() == "mix" || slider.getName() == "outputGain")
         arcCol = juce::Colour (0xff10b981); // Verde esmeralda
-    else if (slider.getName() == "tone")
-        arcCol = juce::Colour (0xfffbbf24); // Amarillo oro
+    else if (slider.getName() == "tone" || slider.getName() == "highCut" || slider.getName() == "inputGain")
+        arcCol = juce::Colour (0xfff59e0b); // Ámbar / Oro
     else if (slider.getName() == "gate")
         arcCol = juce::Colour (0xffef4444); // Rojo
 
@@ -193,20 +193,24 @@ PitchShiftAudioProcessorEditor::PitchShiftAudioProcessorEditor (PitchShiftAudioP
         addAndMakeVisible (l);
     };
 
-    setupRotary (semitonesSlider, semitonesLabel, "semitones", "SEMITONOS", " ST");
-    setupRotary (centsSlider,     centsLabel,     "cents",     "FINO (CENTS)", " ct");
-    setupRotary (mixSlider,       mixLabel,       "mix",       "MEZCLA (MIX)", " %");
-    setupRotary (toneSlider,      toneLabel,      "tone",      "TONO (HIGH CUT)", " Hz");
-    setupRotary (tightSlider,     tightLabel,     "tight",     "TIGHT (LOW CUT)", " Hz");
-    setupRotary (gateSlider,      gateLabel,      "gate",      "PUERTA RUIDO", " dB");
+    setupRotary (inputGainSlider,  inputGainLabel,  "inputGain",  "IN GAIN",        " dB");
+    setupRotary (semitonesSlider,  semitonesLabel,  "semitones",  "SEMITONOS",      " ST");
+    setupRotary (centsSlider,      centsLabel,      "cents",      "FINO (CENTS)",   " ct");
+    setupRotary (mixSlider,        mixLabel,        "mix",        "MEZCLA (MIX)",   " %");
+    setupRotary (lowCutSlider,     lowCutLabel,     "lowCut",     "CORTE GRAVES",   " Hz");
+    setupRotary (highCutSlider,    highCutLabel,    "highCut",    "CORTE AGUDOS",   " Hz");
+    setupRotary (gateSlider,       gateLabel,       "gate",       "PUERTA RUIDO",   " dB");
+    setupRotary (outputGainSlider, outputGainLabel, "outputGain", "OUT GAIN",       " dB");
 
     // Conexión con APVTS para soporte completo de automatización DAW
-    semitonesAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "semitones", semitonesSlider);
-    centsAttachment     = std::make_unique<SliderAttachment> (audioProcessor.apvts, "cents", centsSlider);
-    mixAttachment       = std::make_unique<SliderAttachment> (audioProcessor.apvts, "mix", mixSlider);
-    toneAttachment      = std::make_unique<SliderAttachment> (audioProcessor.apvts, "toneCut", toneSlider);
-    tightAttachment     = std::make_unique<SliderAttachment> (audioProcessor.apvts, "tightCut", tightSlider);
-    gateAttachment      = std::make_unique<SliderAttachment> (audioProcessor.apvts, "gateThreshold", gateSlider);
+    inputGainAttachment  = std::make_unique<SliderAttachment> (audioProcessor.apvts, "inputGain", inputGainSlider);
+    semitonesAttachment  = std::make_unique<SliderAttachment> (audioProcessor.apvts, "semitones", semitonesSlider);
+    centsAttachment      = std::make_unique<SliderAttachment> (audioProcessor.apvts, "cents", centsSlider);
+    mixAttachment        = std::make_unique<SliderAttachment> (audioProcessor.apvts, "mix", mixSlider);
+    lowCutAttachment     = std::make_unique<SliderAttachment> (audioProcessor.apvts, "lowCut", lowCutSlider);
+    highCutAttachment    = std::make_unique<SliderAttachment> (audioProcessor.apvts, "highCut", highCutSlider);
+    gateAttachment       = std::make_unique<SliderAttachment> (audioProcessor.apvts, "gateThreshold", gateSlider);
+    outputGainAttachment = std::make_unique<SliderAttachment> (audioProcessor.apvts, "outputGain", outputGainSlider);
 
     // Botones de ajuste paso a paso (-1, 0, +1)
     semitoneDownBtn.onClick = [this] { semitonesSlider.setValue (semitonesSlider.getValue() - 1.0, juce::sendNotificationSync); };
@@ -257,7 +261,7 @@ PitchShiftAudioProcessorEditor::PitchShiftAudioProcessorEditor (PitchShiftAudioP
     addAndMakeVisible (bypassFootswitch);
 
     startTimerHz (30);
-    setSize (780, 560);
+    setSize (840, 580);
 }
 
 PitchShiftAudioProcessorEditor::~PitchShiftAudioProcessorEditor()
@@ -316,10 +320,10 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setColour (juce::Colour (0xff94a3b8));
     g.setFont (juce::Font (11.0f, juce::Font::bold));
-    g.drawText ("GUITAR & BASS TRANSPOSER ZERO LATENCY", 165, 17, 350, 20, juce::Justification::centredLeft);
+    g.drawText ("GUITAR & BASS TRANSPOSER  •  ZERO LATENCY DSP", 165, 17, 350, 20, juce::Justification::centredLeft);
 
-    // 3. Pantalla OLED Central (x: 24, y: 50, w: 732, h: 105)
-    juce::Rectangle<float> oledRect (24.0f, 50.0f, 732.0f, 105.0f);
+    // 3. Pantalla OLED Central (x: 24, y: 50, w: 792, h: 105)
+    juce::Rectangle<float> oledRect (24.0f, 50.0f, 792.0f, 105.0f);
     g.setColour (juce::Colour (0xff080b12));
     g.fillRoundedRectangle (oledRect, 8.0f);
     g.setColour (juce::Colour (0xff1f293d));
@@ -331,7 +335,7 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
 
     const bool isBass = audioProcessor.apvts.getRawParameterValue ("mode")->load() > 0.5f;
     g.setColour (isBass ? juce::Colour (0xff06b6d4) : juce::Colour (0xfff59e0b));
-    g.drawText (isBass ? "MODO: BAJO ELECTRICO" : "MODO: GUITARRA", 530, 56, 210, 16, juce::Justification::centredRight);
+    g.drawText (isBass ? "MODO: BAJO ELECTRICO" : "MODO: GUITARRA", 560, 56, 240, 16, juce::Justification::centredRight);
 
     const int semi = (int) std::round (audioProcessor.apvts.getRawParameterValue ("semitones")->load());
     const int cents = (int) std::round (audioProcessor.apvts.getRawParameterValue ("cents")->load());
@@ -356,7 +360,7 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setColour (semi == 0 ? juce::Colour (0xff10b981) : (semi < 0 ? juce::Colour (0xfff59e0b) : juce::Colour (0xff06b6d4)));
     g.setFont (juce::Font (24.0f, juce::Font::bold));
-    g.drawText (pitchTitle + "   •   " + tuningName, 36, 75, 700, 35, juce::Justification::centredLeft);
+    g.drawText (pitchTitle + "   •   " + tuningName, 36, 75, 760, 35, juce::Justification::centredLeft);
 
     juce::String stringsText = isBass 
         ? "CUERDAS RESULTANTES (BAJO): " + getBassTuning (semi)
@@ -367,29 +371,41 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
     g.drawText (stringsText, 36, 110, 500, 18, juce::Justification::centredLeft);
 
     const int mixVal = (int) std::round (audioProcessor.apvts.getRawParameterValue ("mix")->load());
-    juce::String techInfo = "CENTS: " + juce::String (cents > 0 ? "+" : "") + juce::String (cents) + " ct"
-                          + "   |   MIX: " + juce::String (mixVal) + "% WET"
-                          + "   |   LATENCIA: 0 SAMPLES";
+    const float inVal = audioProcessor.apvts.getRawParameterValue ("inputGain")->load();
+    const float outVal = audioProcessor.apvts.getRawParameterValue ("outputGain")->load();
+    float lowCutVal = 0.0f;
+    if (auto* p = audioProcessor.apvts.getRawParameterValue ("lowCut")) lowCutVal = p->load();
+    else if (auto* p = audioProcessor.apvts.getRawParameterValue ("tightCut")) lowCutVal = p->load();
+    float highCutVal = 20000.0f;
+    if (auto* p = audioProcessor.apvts.getRawParameterValue ("highCut")) highCutVal = p->load();
+    else if (auto* p = audioProcessor.apvts.getRawParameterValue ("toneCut")) highCutVal = p->load();
+
+    juce::String techInfo = "IN: " + juce::String (inVal > 0 ? "+" : "") + juce::String (inVal, 1) + " dB"
+                          + "  |  MIX: " + juce::String (mixVal) + "%"
+                          + "  |  CORTE GRV: " + (lowCutVal <= 10.0f ? "OFF" : juce::String ((int)lowCutVal) + " Hz (12dB/oct)")
+                          + "  |  CORTE AGD: " + (highCutVal >= 19990.0f ? "OFF" : juce::String ((int)highCutVal) + " Hz (12dB/oct)")
+                          + "  |  OUT: " + juce::String (outVal > 0 ? "+" : "") + juce::String (outVal, 1) + " dB";
+
     g.setColour (juce::Colour (0xff64748b));
     g.setFont (juce::Font (10.0f, juce::Font::plain));
-    g.drawText (techInfo, 36, 130, 680, 16, juce::Justification::centredLeft);
+    g.drawText (techInfo, 36, 130, 750, 16, juce::Justification::centredLeft);
 
     // 4. Barra de accesos directos
-    juce::Rectangle<float> jumpBarRect (24.0f, 165.0f, 732.0f, 36.0f);
+    juce::Rectangle<float> jumpBarRect (24.0f, 165.0f, 792.0f, 36.0f);
     g.setColour (juce::Colour (0xff10131b));
     g.fillRoundedRectangle (jumpBarRect, 6.0f);
     g.setColour (juce::Colour (0xff1e2433));
     g.drawRoundedRectangle (jumpBarRect, 6.0f, 1.0f);
 
-    // 5. Panel de potenciómetros
-    juce::Rectangle<float> knobsRect (24.0f, 208.0f, 732.0f, 198.0f);
+    // 5. Panel de potenciómetros (8 potenciómetros hardware)
+    juce::Rectangle<float> knobsRect (24.0f, 208.0f, 792.0f, 198.0f);
     g.setColour (juce::Colour (0xff10131b));
     g.fillRoundedRectangle (knobsRect, 8.0f);
     g.setColour (juce::Colour (0xff1f2536));
     g.drawRoundedRectangle (knobsRect, 8.0f, 1.0f);
 
     // 6. Panel inferior y Footswitch
-    juce::Rectangle<float> bottomRect (24.0f, 415.0f, 732.0f, 130.0f);
+    juce::Rectangle<float> bottomRect (24.0f, 415.0f, 792.0f, 145.0f);
     g.setColour (juce::Colour (0xff141721));
     g.fillRoundedRectangle (bottomRect, 8.0f);
     g.setColour (juce::Colour (0xff222838));
@@ -397,7 +413,7 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
 
     // LED de estado
     const bool isBypassed = audioProcessor.apvts.getRawParameterValue ("bypass")->load() > 0.5f;
-    const float ledX = 390.0f;
+    const float ledX = 420.0f;
     const float ledY = 432.0f;
 
     if (!isBypassed)
@@ -411,7 +427,7 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
 
         g.setColour (juce::Colour (0xff10b981));
         g.setFont (juce::Font (11.0f, juce::Font::bold));
-        g.drawText ("EFECTO ACTIVO", 240, 444, 300, 16, juce::Justification::centred);
+        g.drawText ("EFECTO ACTIVO (ENGAGED)", 270, 444, 300, 16, juce::Justification::centred);
     }
     else
     {
@@ -422,49 +438,52 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
 
         g.setColour (juce::Colour (0xffef4444));
         g.setFont (juce::Font (11.0f, juce::Font::bold));
-        g.drawText ("BYPASS", 240, 444, 300, 16, juce::Justification::centred);
+        g.drawText ("BYPASS (DIRECTO)", 270, 444, 300, 16, juce::Justification::centred);
     }
 
     g.setColour (juce::Colour (0xff64748b));
     g.setFont (juce::Font (9.0f, juce::Font::bold));
-    g.drawText ("PISAR PARA ACTIVAR / BYPASS", 240, 526, 300, 14, juce::Justification::centred);
+    g.drawText ("PISAR PARA ACTIVAR / BYPASS", 270, 538, 300, 14, juce::Justification::centred);
 
     g.setColour (juce::Colour (0xff475569));
     g.setFont (juce::Font (10.0f, juce::Font::plain));
-    g.drawText ("XAINA DSP", 500, 520, 240, 16, juce::Justification::centredRight);
+    g.drawText ("AUDIOCRAFT DSP • VST3 / STANDALONE", 540, 535, 260, 16, juce::Justification::centredRight);
 }
 
 void PitchShiftAudioProcessorEditor::resized()
 {
-    guitarModeBtn.setBounds (555, 14, 100, 26);
-    bassModeBtn.setBounds (660, 14, 95, 26);
+    guitarModeBtn.setBounds (615, 14, 100, 26);
+    bassModeBtn.setBounds (720, 14, 95, 26);
 
     int startX = 26;
-    int btnW = 53;
+    int btnW = 57;
     for (auto& btn : quickJumpButtons)
     {
         btn->setBounds (startX, 170, btnW, 26);
         startX += btnW + 3;
     }
 
-    int knobStartX = 26;
-    int colWidth = 121;
-    juce::Slider* sliders[] = { &semitonesSlider, &centsSlider, &mixSlider, &toneSlider, &tightSlider, &gateSlider };
-    juce::Label* labels[]   = { &semitonesLabel, &centsLabel, &mixLabel, &toneLabel, &tightLabel, &gateLabel };
+    int knobStartX = 24;
+    int colWidth = 99;
+    juce::Slider* sliders[] = { &inputGainSlider, &semitonesSlider, &centsSlider, &mixSlider, &lowCutSlider, &highCutSlider, &gateSlider, &outputGainSlider };
+    juce::Label* labels[]   = { &inputGainLabel, &semitonesLabel, &centsLabel, &mixLabel, &lowCutLabel, &highCutLabel, &gateLabel, &outputGainLabel };
 
-    for (int i = 0; i < 6; ++i)
+    for (int i = 0; i < 8; ++i)
     {
         int x = knobStartX + i * colWidth;
         labels[i]->setBounds (x, 216, colWidth, 18);
-        sliders[i]->setBounds (x + (colWidth - 85) / 2, 236, 85, 95);
+        sliders[i]->setBounds (x + (colWidth - 78) / 2, 236, 78, 95);
     }
 
-    semitoneDownBtn.setBounds (knobStartX + 12, 342, 32, 22);
-    semitoneZeroBtn.setBounds (knobStartX + 47, 342, 28, 22);
-    semitoneUpBtn.setBounds   (knobStartX + 78, 342, 32, 22);
+    // Botones de ajuste fino bajo Semitonos (Columna 1)
+    int semiColX = knobStartX + 1 * colWidth;
+    semitoneDownBtn.setBounds (semiColX + 5, 342, 28, 22);
+    semitoneZeroBtn.setBounds (semiColX + 35, 342, 28, 22);
+    semitoneUpBtn.setBounds   (semiColX + 65, 342, 28, 22);
 
-    int gateColX = knobStartX + 5 * colWidth;
-    gateToggleBtn.setBounds (gateColX + 15, 342, 90, 22);
+    // Botón Puerta de Ruido bajo Gate (Columna 6)
+    int gateColX = knobStartX + 6 * colWidth;
+    gateToggleBtn.setBounds (gateColX + 6, 342, colWidth - 12, 22);
 
-    bypassFootswitch.setBounds (390 - 35, 465, 70, 58);
+    bypassFootswitch.setBounds (420 - 35, 475, 70, 58);
 }

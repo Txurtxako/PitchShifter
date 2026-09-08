@@ -46,10 +46,11 @@ private:
     double phase0 = 0.0;
     double phase1 = 0.5;
 
-    // Filtros de modelado Tight y Tone sin dependencias complejas
-    float tightPrevInL = 0.0f, tightPrevInR = 0.0f;
-    float tightPrevOutL = 0.0f, tightPrevOutR = 0.0f;
-    float tonePrevOutL = 0.0f, tonePrevOutR = 0.0f;
+    // Filtros de corte 12 dB/octava (Butterworth Q = 0.7071) Direct Form II Transposed
+    float lowCutZ1L = 0.0f, lowCutZ2L = 0.0f;
+    float lowCutZ1R = 0.0f, lowCutZ2R = 0.0f;
+    float highCutZ1L = 0.0f, highCutZ2L = 0.0f;
+    float highCutZ1R = 0.0f, highCutZ2R = 0.0f;
 
     // Puerta de ruido
     float gateEnvelope = 0.0f;

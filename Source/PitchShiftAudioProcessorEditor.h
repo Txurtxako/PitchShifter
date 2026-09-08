@@ -40,21 +40,25 @@ private:
     PitchShiftAudioProcessor& audioProcessor;
     CustomPedalLookAndFeel customLookAndFeel;
 
-    // Sliders principales
+    // Sliders principales (8 potenciómetros hardware)
+    juce::Slider inputGainSlider;
     juce::Slider semitonesSlider;
     juce::Slider centsSlider;
     juce::Slider mixSlider;
-    juce::Slider toneSlider;
-    juce::Slider tightSlider;
+    juce::Slider lowCutSlider;
+    juce::Slider highCutSlider;
     juce::Slider gateSlider;
+    juce::Slider outputGainSlider;
 
     // Etiquetas de los potenciómetros
+    juce::Label inputGainLabel;
     juce::Label semitonesLabel;
     juce::Label centsLabel;
     juce::Label mixLabel;
-    juce::Label toneLabel;
-    juce::Label tightLabel;
+    juce::Label lowCutLabel;
+    juce::Label highCutLabel;
     juce::Label gateLabel;
+    juce::Label outputGainLabel;
 
     // Botones de ajuste fino semitono (-1, 0, +1)
     juce::TextButton semitoneDownBtn { "-1" };
@@ -78,12 +82,14 @@ private:
     using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ButtonAttachment = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
+    std::unique_ptr<SliderAttachment> inputGainAttachment;
     std::unique_ptr<SliderAttachment> semitonesAttachment;
     std::unique_ptr<SliderAttachment> centsAttachment;
     std::unique_ptr<SliderAttachment> mixAttachment;
-    std::unique_ptr<SliderAttachment> toneAttachment;
-    std::unique_ptr<SliderAttachment> tightAttachment;
+    std::unique_ptr<SliderAttachment> lowCutAttachment;
+    std::unique_ptr<SliderAttachment> highCutAttachment;
     std::unique_ptr<SliderAttachment> gateAttachment;
+    std::unique_ptr<SliderAttachment> outputGainAttachment;
     std::unique_ptr<ButtonAttachment> bypassAttachment;
     std::unique_ptr<ButtonAttachment> gateEnableAttachment;
 

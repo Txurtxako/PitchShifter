@@ -16,6 +16,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout PitchShiftAudioProcessor::cr
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
 
+    // Ganancia de entrada: -24 dB a +24 dB
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "inputGain", 1 }, "Input Gain",
+        juce::NormalisableRange<float> (-24.0f, 24.0f, 0.1f), 0.0f));
+
     // Semitonos: -24 a +24 con paso de 1 semitono
     params.push_back (std::make_unique<juce::AudioParameterInt> (
         juce::ParameterID { "semitones", 1 }, "Semitones", -24, 24, 0));
@@ -34,26 +39,37 @@ juce::AudioProcessorValueTreeState::ParameterLayout PitchShiftAudioProcessor::cr
         juce::ParameterID { "mix", 1 }, "Mix",
         juce::NormalisableRange<float> (0.0f, 100.0f, 1.0f), 100.0f));
 
-    // Tight Low-Cut: 20 Hz a 140 Hz
+    // Corte de Graves (Low Cut): 0 Hz a 20 kHz (12 dB/octava Butterworth)
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { "tightCut", 1 }, "Tight Low Cut",
-        juce::NormalisableRange<float> (20.0f, 140.0f, 1.0f), 20.0f));
-
-    // Tone High-Cut: 2000 Hz a 20000 Hz
+        juce::ParameterID { "lowCut", 1 }, "Corte Graves (Low Cut)",
+        juce::NormalisableRange<float> (0.0f, 20000.0f, 1.0f, 0.35f), 0.0f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
-        juce::ParameterID { "toneCut", 1 }, "Tone High Cut",
-        juce::NormalisableRange<float> (2000.0f, 20000.0f, 10.0f), 18000.0f));
+        juce::ParameterID { "tightCut", 1 }, "Tight Low Cut (Legacy)",
+        juce::NormalisableRange<float> (0.0f, 20000.0f, 1.0f, 0.35f), 0.0f));
 
-    // Bypass
-    params.push_back (std::make_unique<juce::AudioParameterBool> (
-        juce::ParameterID { "bypass", 1 }, "Bypass", false));
+    // Corte de Agudos (High Cut): 20 kHz a 0 Hz (12 dB/octava Butterworth)
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "highCut", 1 }, "Corte Agudos (High Cut)",
+        juce::NormalisableRange<float> (0.0f, 20000.0f, 1.0f, 0.35f), 20000.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "toneCut", 1 }, "Tone High Cut (Legacy)",
+        juce::NormalisableRange<float> (0.0f, 20000.0f, 1.0f, 0.35f), 20000.0f));
 
-    // Noise Gate
+    // Puerta de Ruido
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         juce::ParameterID { "gateEnable", 1 }, "Noise Gate", true));
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         juce::ParameterID { "gateThreshold", 1 }, "Gate Threshold",
         juce::NormalisableRange<float> (-80.0f, -20.0f, 0.5f), -55.0f));
+
+    // Ganancia de salida: -24 dB a +24 dB
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        juce::ParameterID { "outputGain", 1 }, "Output Gain",
+        juce::NormalisableRange<float> (-24.0f, 24.0f, 0.1f), 0.0f));
+
+    // Bypass
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        juce::ParameterID { "bypass", 1 }, "Bypass", false));
 
     return { params.begin(), params.end() };
 }
@@ -71,9 +87,8 @@ void PitchShiftAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     phase0 = 0.0;
     phase1 = 0.5;
 
-    tightPrevInL = 0.0f; tightPrevInR = 0.0f;
-    tightPrevOutL = 0.0f; tightPrevOutR = 0.0f;
-    tonePrevOutL = 0.0f; tonePrevOutR = 0.0f;
+    lowCutZ1L = lowCutZ2L = lowCutZ1R = lowCutZ2R = 0.0f;
+    highCutZ1L = highCutZ2L = highCutZ1R = highCutZ2R = 0.0f;
     gateEnvelope = 0.0f;
 }
 
@@ -107,13 +122,66 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     const int mode = (int) apvts.getRawParameterValue ("mode")->load();
     const float mix = apvts.getRawParameterValue ("mix")->load() / 100.0f;
     const bool bypass = apvts.getRawParameterValue ("bypass")->load() > 0.5f;
-    const float tightHz = apvts.getRawParameterValue ("tightCut")->load();
-    const float toneHz = apvts.getRawParameterValue ("toneCut")->load();
+
+    float inGainDb = 0.0f;
+    if (auto* p = apvts.getRawParameterValue ("inputGain")) inGainDb = p->load();
+    const float inGainLin = std::pow (10.0f, inGainDb / 20.0f);
+
+    float outGainDb = 0.0f;
+    if (auto* p = apvts.getRawParameterValue ("outputGain")) outGainDb = p->load();
+    const float outGainLin = std::pow (10.0f, outGainDb / 20.0f);
+
+    float lowCutHz = 0.0f;
+    if (auto* p = apvts.getRawParameterValue ("lowCut")) lowCutHz = p->load();
+    else if (auto* p = apvts.getRawParameterValue ("tightCut")) lowCutHz = p->load();
+
+    float highCutHz = 20000.0f;
+    if (auto* p = apvts.getRawParameterValue ("highCut")) highCutHz = p->load();
+    else if (auto* p = apvts.getRawParameterValue ("toneCut")) highCutHz = p->load();
+
     const bool gateOn = apvts.getRawParameterValue ("gateEnable")->load() > 0.5f;
     const float gateThreshDb = apvts.getRawParameterValue ("gateThreshold")->load();
 
     if (bypass)
         return;
+
+    // Coeficientes filtro Corte Graves (12 dB/octava Butterworth High-Pass)
+    const bool hasLowCut = (lowCutHz > 10.0f);
+    float lowB0 = 1.0f, lowB1 = 0.0f, lowB2 = 0.0f, lowA1 = 0.0f, lowA2 = 0.0f;
+    if (hasLowCut)
+    {
+        const float fc = juce::jlimit (10.0f, (float)(currentSampleRate * 0.495), lowCutHz);
+        const float w0 = 2.0f * juce::MathConstants<float>::pi * fc / (float) currentSampleRate;
+        const float cosw0 = std::cos (w0);
+        const float sinw0 = std::sin (w0);
+        const float alpha = sinw0 / (2.0f * 0.70710678f);
+        const float a0 = 1.0f + alpha;
+
+        lowB0 = ((1.0f + cosw0) * 0.5f) / a0;
+        lowB1 = (-(1.0f + cosw0)) / a0;
+        lowB2 = ((1.0f + cosw0) * 0.5f) / a0;
+        lowA1 = (-2.0f * cosw0) / a0;
+        lowA2 = (1.0f - alpha) / a0;
+    }
+
+    // Coeficientes filtro Corte Agudos (12 dB/octava Butterworth Low-Pass)
+    const bool hasHighCut = (highCutHz < 19990.0f);
+    float highB0 = 1.0f, highB1 = 0.0f, highB2 = 0.0f, highA1 = 0.0f, highA2 = 0.0f;
+    if (hasHighCut)
+    {
+        const float fc = juce::jlimit (10.0f, (float)(currentSampleRate * 0.495), highCutHz);
+        const float w0 = 2.0f * juce::MathConstants<float>::pi * fc / (float) currentSampleRate;
+        const float cosw0 = std::cos (w0);
+        const float sinw0 = std::sin (w0);
+        const float alpha = sinw0 / (2.0f * 0.70710678f);
+        const float a0 = 1.0f + alpha;
+
+        highB0 = ((1.0f - cosw0) * 0.5f) / a0;
+        highB1 = (1.0f - cosw0) / a0;
+        highB2 = ((1.0f - cosw0) * 0.5f) / a0;
+        highA1 = (-2.0f * cosw0) / a0;
+        highA2 = (1.0f - alpha) / a0;
+    }
 
     const double totalSemitones = (double) semitones + ((double) cents / 100.0);
     const double pitchRatio = std::pow (2.0, totalSemitones / 12.0);
@@ -129,10 +197,11 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
 
     for (int i = 0; i < numSamples; ++i)
     {
-        const float inL = channelL[i];
-        const float inR = channelR[i];
+        // 1. Ganancia de entrada
+        const float inL = channelL[i] * inGainLin;
+        const float inR = channelR[i] * inGainLin;
 
-        // Puerta de ruido
+        // 2. Puerta de ruido
         if (gateOn)
         {
             const float peak = std::max (std::abs (inL), std::abs (inR));
@@ -145,12 +214,30 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
             gateEnvelope = 1.0f;
         }
 
-        const float gatedL = inL * gateEnvelope;
-        const float gatedR = inR * gateEnvelope;
+        float sigL = inL * gateEnvelope;
+        float sigR = inR * gateEnvelope;
 
-        // Escritura al buffer circular
-        delayBufferL[writePointer] = gatedL;
-        delayBufferR[writePointer] = gatedR;
+        // 3. Filtro Corte de Graves (Low Cut: 0 Hz a 20 kHz, 12 dB/octava Butterworth)
+        if (hasLowCut)
+        {
+            float yL = lowB0 * sigL + lowCutZ1L;
+            lowCutZ1L = lowB1 * sigL - lowA1 * yL + lowCutZ2L;
+            lowCutZ2L = lowB2 * sigL - lowA2 * yL;
+            if (std::abs (lowCutZ1L) < 1.0e-15f) lowCutZ1L = 0.0f;
+            if (std::abs (lowCutZ2L) < 1.0e-15f) lowCutZ2L = 0.0f;
+            sigL = yL;
+
+            float yR = lowB0 * sigR + lowCutZ1R;
+            lowCutZ1R = lowB1 * sigR - lowA1 * yR + lowCutZ2R;
+            lowCutZ2R = lowB2 * sigR - lowA2 * yR;
+            if (std::abs (lowCutZ1R) < 1.0e-15f) lowCutZ1R = 0.0f;
+            if (std::abs (lowCutZ2R) < 1.0e-15f) lowCutZ2R = 0.0f;
+            sigR = yR;
+        }
+
+        // 4. Escritura al buffer circular
+        delayBufferL[writePointer] = sigL;
+        delayBufferR[writePointer] = sigR;
 
         // Progreso de fases (0.0 a 1.0)
         phase0 += phaseRate;
@@ -189,37 +276,34 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
         float wetL = val0L * w0 + val1L * w1;
         float wetR = val0R * w0 + val1R * w1;
 
-        // Filtro Tight (Pasa-altos para limpiar subgraves en afinaciones Drop)
-        if (tightHz > 22.0f)
-        {
-            const float dt = 1.0f / (float) currentSampleRate;
-            const float rc = 1.0f / (2.0f * juce::MathConstants<float>::pi * tightHz);
-            const float alpha = rc / (rc + dt);
-            const float filteredL = alpha * (tightPrevOutL + wetL - tightPrevInL);
-            const float filteredR = alpha * (tightPrevOutR + wetR - tightPrevInR);
-            tightPrevInL = wetL; tightPrevInR = wetR;
-            tightPrevOutL = filteredL; tightPrevOutR = filteredR;
-            wetL = filteredL; wetR = filteredR;
-        }
-
-        // Filtro Tone (Pasa-bajos para calidez o control de armónicos altos)
-        if (toneHz < 19500.0f)
-        {
-            const float dt = 1.0f / (float) currentSampleRate;
-            const float rc = 1.0f / (2.0f * juce::MathConstants<float>::pi * toneHz);
-            const float alpha = dt / (rc + dt);
-            const float filteredL = tonePrevOutL + alpha * (wetL - tonePrevOutL);
-            const float filteredR = tonePrevOutR + alpha * (wetR - tonePrevOutR);
-            tonePrevOutL = filteredL; tonePrevOutR = filteredR;
-            wetL = filteredL; wetR = filteredR;
-        }
-
-        // Mezcla Dry/Wet con ley de potencia constante
+        // 5. Mezcla Dry/Wet con ley de potencia constante
         const float dryWeight = std::cos (mix * 0.5f * juce::MathConstants<float>::pi);
         const float wetWeight = std::sin (mix * 0.5f * juce::MathConstants<float>::pi);
 
-        channelL[i] = inL * dryWeight + wetL * wetWeight;
-        channelR[i] = inR * dryWeight + wetR * wetWeight;
+        float mixedL = sigL * dryWeight + wetL * wetWeight;
+        float mixedR = sigR * dryWeight + wetR * wetWeight;
+
+        // 6. Filtro Corte de Agudos (High Cut: 20 kHz a 0 Hz, 12 dB/octava Butterworth)
+        if (hasHighCut)
+        {
+            float yL = highB0 * mixedL + highCutZ1L;
+            highCutZ1L = highB1 * mixedL - highA1 * yL + highCutZ2L;
+            highCutZ2L = highB2 * mixedL - highA2 * yL;
+            if (std::abs (highCutZ1L) < 1.0e-15f) highCutZ1L = 0.0f;
+            if (std::abs (highCutZ2L) < 1.0e-15f) highCutZ2L = 0.0f;
+            mixedL = yL;
+
+            float yR = highB0 * mixedR + highCutZ1R;
+            highCutZ1R = highB1 * mixedR - highA1 * yR + highCutZ2R;
+            highCutZ2R = highB2 * mixedR - highA2 * yR;
+            if (std::abs (highCutZ1R) < 1.0e-15f) highCutZ1R = 0.0f;
+            if (std::abs (highCutZ2R) < 1.0e-15f) highCutZ2R = 0.0f;
+            mixedR = yR;
+        }
+
+        // 7. Ganancia de salida y asignación al buffer
+        channelL[i] = mixedL * outGainLin;
+        channelR[i] = mixedR * outGainLin;
 
         writePointer = (writePointer + 1) % delayBufLen;
     }
