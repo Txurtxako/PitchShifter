@@ -16,7 +16,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(JUCE)
 
 juce_add_plugin(PitchShiftVST3
-    COMPANY_NAME "AudioCraft DSP"
+    COMPANY_NAME "Xaina DSP"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE
     NEEDS_MIDI_OUTPUT FALSE
