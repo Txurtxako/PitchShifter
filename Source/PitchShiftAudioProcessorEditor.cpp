@@ -380,7 +380,7 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setColour (juce::Colour (0xff94a3b8));
     g.setFont (juce::Font (11.0f, juce::Font::bold));
-    g.drawText ("GUITAR & BASS TRANSPOSER  •  ZERO LATENCY DSP", 165, 17, 350, 20, juce::Justification::centredLeft);
+    g.drawText ("GUITAR & BASS TRANSPOSER", 165, 17, 350, 20, juce::Justification::centredLeft);
 
     // 3. Pantalla OLED Central (x: 24, y: 50, w: 792, h: 105)
     juce::Rectangle<float> oledRect (24.0f, 50.0f, 792.0f, 105.0f);
@@ -471,47 +471,21 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
     g.setColour (juce::Colour (0xff222838));
     g.drawRoundedRectangle (bottomRect, 8.0f, 1.0f);
 
-    // LED de estado central
+    // Texto de estado de efecto (Sin luz LED, solo texto informativo)
     const bool isBypassed = audioProcessor.apvts.getRawParameterValue ("bypass")->load() > 0.5f;
-    const float ledX = 420.0f;
-    const float ledY = 432.0f;
 
     if (!isBypassed)
     {
-        g.setColour (juce::Colour (0x4410b981));
-        g.fillEllipse (ledX - 12.0f, ledY - 12.0f, 24.0f, 24.0f);
-        g.setColour (juce::Colour (0xff10b981));
-        g.fillEllipse (ledX - 5.0f, ledY - 5.0f, 10.0f, 10.0f);
-        g.setColour (juce::Colour (0xffffffff));
-        g.fillEllipse (ledX - 1.5f, ledY - 1.5f, 3.0f, 3.0f);
-
-        g.setColour (juce::Colour (0xfff1f5f9));
+        g.setColour (juce::Colour (0xff34d399));
         g.setFont (juce::Font (11.0f, juce::Font::bold));
-        g.drawText ("EFECTO ENGANCHADO (ACTIVE)", 220, 424, 400, 16, juce::Justification::centred);
+        g.drawText ("ACTIVO)", 220, 428, 400, 16, juce::Justification::centred);
     }
     else
     {
-        g.setColour (juce::Colour (0x33ef4444));
-        g.fillEllipse (ledX - 10.0f, ledY - 10.0f, 20.0f, 20.0f);
-        g.setColour (juce::Colour (0xffef4444));
-        g.fillEllipse (ledX - 5.0f, ledY - 5.0f, 10.0f, 10.0f);
-
-        g.setColour (juce::Colour (0xfff87171));
+        g.setColour (juce::Colour (0xff94a3b8));
         g.setFont (juce::Font (11.0f, juce::Font::bold));
-        g.drawText ("BYPASS (DIRECTO)", 220, 424, 400, 16, juce::Justification::centred);
+        g.drawText ("BYPASS", 220, 428, 400, 16, juce::Justification::centred);
     }
-
-    // Escalas de dB bajo los faders horizontales
-    g.setColour (juce::Colour (0xff64748b));
-    g.setFont (juce::Font (9.0f, juce::Font::plain));
-    // Fader Ganancia Entrada
-    g.drawText ("-24dB", 42, 508, 50, 12, juce::Justification::centredLeft);
-    g.drawText ("0dB", 160, 508, 50, 12, juce::Justification::centred);
-    g.drawText ("+24dB", 272, 508, 55, 12, juce::Justification::centredRight);
-    // Fader Volumen Salida
-    g.drawText ("-24dB", 515, 508, 50, 12, juce::Justification::centredLeft);
-    g.drawText ("0dB", 633, 508, 50, 12, juce::Justification::centred);
-    g.drawText ("+24dB", 745, 508, 55, 12, juce::Justification::centredRight);
 
     g.setColour (juce::Colour (0xff64748b));
     g.setFont (juce::Font (9.0f, juce::Font::bold));
@@ -519,7 +493,7 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setColour (juce::Colour (0xff475569));
     g.setFont (juce::Font (10.0f, juce::Font::plain));
-    g.drawText ("AUDIOCRAFT DSP • VST3 / STANDALONE", 540, 538, 260, 16, juce::Justification::centredRight);
+    g.drawText ("XAINA DSP", 540, 538, 260, 16, juce::Justification::centredRight);
 }
 
 void PitchShiftAudioProcessorEditor::resized()

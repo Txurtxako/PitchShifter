@@ -217,25 +217,7 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
         float sigL = inL * gateEnvelope;
         float sigR = inR * gateEnvelope;
 
-        // 3. Filtro Corte de Graves (Low Cut: 0 Hz a 20 kHz, 12 dB/octava Butterworth)
-        if (hasLowCut)
-        {
-            float yL = lowB0 * sigL + lowCutZ1L;
-            lowCutZ1L = lowB1 * sigL - lowA1 * yL + lowCutZ2L;
-            lowCutZ2L = lowB2 * sigL - lowA2 * yL;
-            if (std::abs (lowCutZ1L) < 1.0e-15f) lowCutZ1L = 0.0f;
-            if (std::abs (lowCutZ2L) < 1.0e-15f) lowCutZ2L = 0.0f;
-            sigL = yL;
-
-            float yR = lowB0 * sigR + lowCutZ1R;
-            lowCutZ1R = lowB1 * sigR - lowA1 * yR + lowCutZ2R;
-            lowCutZ2R = lowB2 * sigR - lowA2 * yR;
-            if (std::abs (lowCutZ1R) < 1.0e-15f) lowCutZ1R = 0.0f;
-            if (std::abs (lowCutZ2R) < 1.0e-15f) lowCutZ2R = 0.0f;
-            sigR = yR;
-        }
-
-        // 4. Escritura al buffer circular
+        // 3. Escritura al buffer circular (señal directa post-puerta)
         delayBufferL[writePointer] = sigL;
         delayBufferR[writePointer] = sigR;
 
@@ -276,32 +258,49 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
         float wetL = val0L * w0 + val1L * w1;
         float wetR = val0R * w0 + val1R * w1;
 
-        // 5. Mezcla Dry/Wet con ley de potencia constante
+        // 4. Filtros Corte de Graves y Corte de Agudos (APLICADOS EXCLUSIVAMENTE A LA SEÑAL WET, EL DRY QUEDA INTACTO)
+        if (hasLowCut)
+        {
+            float yL = lowB0 * wetL + lowCutZ1L;
+            lowCutZ1L = lowB1 * wetL - lowA1 * yL + lowCutZ2L;
+            lowCutZ2L = lowB2 * wetL - lowA2 * yL;
+            if (std::abs (lowCutZ1L) < 1.0e-15f) lowCutZ1L = 0.0f;
+            if (std::abs (lowCutZ2L) < 1.0e-15f) lowCutZ2L = 0.0f;
+            wetL = yL;
+
+            float yR = lowB0 * wetR + lowCutZ1R;
+            lowCutZ1R = lowB1 * wetR - lowA1 * yR + lowCutZ2R;
+            lowCutZ2R = lowB2 * wetR - lowA2 * yR;
+            if (std::abs (lowCutZ1R) < 1.0e-15f) lowCutZ1R = 0.0f;
+            if (std::abs (lowCutZ2R) < 1.0e-15f) lowCutZ2R = 0.0f;
+            wetR = yR;
+        }
+
+        if (hasHighCut)
+        {
+            float yL = highB0 * wetL + highCutZ1L;
+            highCutZ1L = highB1 * wetL - highA1 * yL + highCutZ2L;
+            highCutZ2L = highB2 * wetL - highA2 * yL;
+            if (std::abs (highCutZ1L) < 1.0e-15f) highCutZ1L = 0.0f;
+            if (std::abs (highCutZ2L) < 1.0e-15f) highCutZ2L = 0.0f;
+            wetL = yL;
+
+            float yR = highB0 * wetR + highCutZ1R;
+            highCutZ1R = highB1 * wetR - highA1 * yR + highCutZ2R;
+            highCutZ2R = highB2 * wetR - highA2 * yR;
+            if (std::abs (highCutZ1R) < 1.0e-15f) highCutZ1R = 0.0f;
+            if (std::abs (highCutZ2R) < 1.0e-15f) highCutZ2R = 0.0f;
+            wetR = yR;
+        }
+
+        // 5. Mezcla Dry/Wet con ley de potencia constante (Dry sin alteración espectral)
         const float dryWeight = std::cos (mix * 0.5f * juce::MathConstants<float>::pi);
         const float wetWeight = std::sin (mix * 0.5f * juce::MathConstants<float>::pi);
 
         float mixedL = sigL * dryWeight + wetL * wetWeight;
         float mixedR = sigR * dryWeight + wetR * wetWeight;
 
-        // 6. Filtro Corte de Agudos (High Cut: 20 kHz a 0 Hz, 12 dB/octava Butterworth)
-        if (hasHighCut)
-        {
-            float yL = highB0 * mixedL + highCutZ1L;
-            highCutZ1L = highB1 * mixedL - highA1 * yL + highCutZ2L;
-            highCutZ2L = highB2 * mixedL - highA2 * yL;
-            if (std::abs (highCutZ1L) < 1.0e-15f) highCutZ1L = 0.0f;
-            if (std::abs (highCutZ2L) < 1.0e-15f) highCutZ2L = 0.0f;
-            mixedL = yL;
-
-            float yR = highB0 * mixedR + highCutZ1R;
-            highCutZ1R = highB1 * mixedR - highA1 * yR + highCutZ2R;
-            highCutZ2R = highB2 * mixedR - highA2 * yR;
-            if (std::abs (highCutZ1R) < 1.0e-15f) highCutZ1R = 0.0f;
-            if (std::abs (highCutZ2R) < 1.0e-15f) highCutZ2R = 0.0f;
-            mixedR = yR;
-        }
-
-        // 7. Ganancia de salida y asignación al buffer
+        // 6. Ganancia de salida y asignación al buffer
         channelL[i] = mixedL * outGainLin;
         channelR[i] = mixedR * outGainLin;
 
