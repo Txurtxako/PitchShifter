@@ -102,6 +102,41 @@ void CustomPedalLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, 
     g.fillPath (p);
 }
 
+void CustomPedalLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int width, int height,
+                                               float sliderPos, float minSliderPos, float maxSliderPos,
+                                               const juce::Slider::SliderStyle, juce::Slider& slider)
+{
+    juce::ignoreUnused (minSliderPos, maxSliderPos, slider);
+    auto trackY = (float) y + (float) height * 0.5f;
+    auto trackH = 6.0f;
+    auto trackBounds = juce::Rectangle<float> ((float) x, trackY - trackH * 0.5f, (float) width, trackH);
+
+    // Canal o ranura oscura con bisel interno
+    g.setColour (juce::Colour (0xff1c1f28));
+    g.fillRoundedRectangle (trackBounds, 3.0f);
+    g.setColour (juce::Colour (0xff2e3342));
+    g.drawRoundedRectangle (trackBounds, 3.0f, 1.0f);
+
+    // Disco metálico ámbar del fader
+    auto thumbRadius = 10.0f;
+    auto thumbX = juce::jlimit ((float) x + thumbRadius, (float) (x + width) - thumbRadius, sliderPos);
+    auto thumbY = trackY;
+
+    // Resplandor cálido ámbar
+    g.setColour (juce::Colour (0x55f59e0b));
+    g.fillEllipse (thumbX - thumbRadius - 2.0f, thumbY - thumbRadius - 2.0f, (thumbRadius + 2.0f) * 2.0f, (thumbRadius + 2.0f) * 2.0f);
+
+    // Gradiente metálico dorado / ámbar
+    juce::ColourGradient thumbGrad (juce::Colour (0xfffbbf24), thumbX - thumbRadius * 0.5f, thumbY - thumbRadius * 0.5f,
+                                    juce::Colour (0xffb45309), thumbX + thumbRadius, thumbY + thumbRadius, false);
+    g.setGradientFill (thumbGrad);
+    g.fillEllipse (thumbX - thumbRadius, thumbY - thumbRadius, thumbRadius * 2.0f, thumbRadius * 2.0f);
+
+    // Anillo exterior brillante
+    g.setColour (juce::Colour (0xfffde68a));
+    g.drawEllipse (thumbX - thumbRadius, thumbY - thumbRadius, thumbRadius * 2.0f, thumbRadius * 2.0f, 1.5f);
+}
+
 void CustomPedalLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& button,
                                                    const juce::Colour& backgroundColour,
                                                    bool shouldDrawButtonAsHighlighted,
@@ -138,6 +173,14 @@ void CustomPedalLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Butt
         g.fillEllipse (centre.x - innerRadius, centre.y - innerRadius, innerRadius * 2.0f, innerRadius * 2.0f);
         g.setColour (juce::Colour (0xffcbd5e1));
         g.drawEllipse (centre.x - innerRadius, centre.y - innerRadius, innerRadius * 2.0f, innerRadius * 2.0f, 1.0f);
+
+        // Icono de standby/power en el centro
+        const bool active = !button.getToggleState();
+        g.setColour (active ? juce::Colour (0xff059669) : juce::Colour (0xff64748b));
+        juce::Path powerArc;
+        powerArc.addCentredArc (centre.x, centre.y, innerRadius * 0.45f, innerRadius * 0.45f, 0.0f, juce::MathConstants<float>::pi * 0.25f, juce::MathConstants<float>::pi * 1.75f, true);
+        g.strokePath (powerArc, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        g.drawLine (centre.x, centre.y - innerRadius * 0.5f, centre.x, centre.y - 1.0f, 2.0f);
         return;
     }
 
@@ -193,14 +236,31 @@ PitchShiftAudioProcessorEditor::PitchShiftAudioProcessorEditor (PitchShiftAudioP
         addAndMakeVisible (l);
     };
 
-    setupRotary (inputGainSlider,  inputGainLabel,  "inputGain",  "IN GAIN",        " dB");
+    auto setupLinearFader = [this] (juce::Slider& s, juce::Label& l, const juce::String& name, const juce::String& text) {
+        s.setSliderStyle (juce::Slider::LinearHorizontal);
+        s.setTextBoxStyle (juce::Slider::TextBoxRight, false, 60, 18);
+        s.setTextValueSuffix (" dB");
+        s.setName (name);
+        addAndMakeVisible (s);
+
+        l.setText (text, juce::dontSendNotification);
+        l.setJustificationType (juce::Justification::centredLeft);
+        l.setFont (juce::Font (11.0f, juce::Font::bold));
+        l.setColour (juce::Label::textColourId, juce::Colour (0xffcbd5e1));
+        addAndMakeVisible (l);
+    };
+
+    // 6 Potenciómetros superiores (Modelado tímbrico y transposición)
     setupRotary (semitonesSlider,  semitonesLabel,  "semitones",  "SEMITONOS",      " ST");
     setupRotary (centsSlider,      centsLabel,      "cents",      "FINO (CENTS)",   " ct");
     setupRotary (mixSlider,        mixLabel,        "mix",        "MEZCLA (MIX)",   " %");
     setupRotary (lowCutSlider,     lowCutLabel,     "lowCut",     "CORTE GRAVES",   " Hz");
     setupRotary (highCutSlider,    highCutLabel,    "highCut",    "CORTE AGUDOS",   " Hz");
     setupRotary (gateSlider,       gateLabel,       "gate",       "PUERTA RUIDO",   " dB");
-    setupRotary (outputGainSlider, outputGainLabel, "outputGain", "OUT GAIN",       " dB");
+
+    // Faders lineales inferiores (Ganancia de Entrada y Volumen de Salida)
+    setupLinearFader (inputGainSlider,  inputGainLabel,  "inputGain",  "GANANCIA ENTRADA");
+    setupLinearFader (outputGainSlider, outputGainLabel, "outputGain", "VOLUMEN SALIDA");
 
     // Conexión con APVTS para soporte completo de automatización DAW
     inputGainAttachment  = std::make_unique<SliderAttachment> (audioProcessor.apvts, "inputGain", inputGainSlider);
@@ -397,21 +457,21 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
     g.setColour (juce::Colour (0xff1e2433));
     g.drawRoundedRectangle (jumpBarRect, 6.0f, 1.0f);
 
-    // 5. Panel de potenciómetros (8 potenciómetros hardware)
+    // 5. Panel de potenciómetros (6 potenciómetros hardware de modelado tímbrico)
     juce::Rectangle<float> knobsRect (24.0f, 208.0f, 792.0f, 198.0f);
     g.setColour (juce::Colour (0xff10131b));
     g.fillRoundedRectangle (knobsRect, 8.0f);
     g.setColour (juce::Colour (0xff1f2536));
     g.drawRoundedRectangle (knobsRect, 8.0f, 1.0f);
 
-    // 6. Panel inferior y Footswitch
+    // 6. Panel inferior y Footswitch (Faders In/Out Gain + Pulsador central Stomp)
     juce::Rectangle<float> bottomRect (24.0f, 415.0f, 792.0f, 145.0f);
     g.setColour (juce::Colour (0xff141721));
     g.fillRoundedRectangle (bottomRect, 8.0f);
     g.setColour (juce::Colour (0xff222838));
     g.drawRoundedRectangle (bottomRect, 8.0f, 1.0f);
 
-    // LED de estado
+    // LED de estado central
     const bool isBypassed = audioProcessor.apvts.getRawParameterValue ("bypass")->load() > 0.5f;
     const float ledX = 420.0f;
     const float ledY = 432.0f;
@@ -421,25 +481,37 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
         g.setColour (juce::Colour (0x4410b981));
         g.fillEllipse (ledX - 12.0f, ledY - 12.0f, 24.0f, 24.0f);
         g.setColour (juce::Colour (0xff10b981));
-        g.fillEllipse (ledX - 6.0f, ledY - 6.0f, 12.0f, 12.0f);
+        g.fillEllipse (ledX - 5.0f, ledY - 5.0f, 10.0f, 10.0f);
         g.setColour (juce::Colour (0xffffffff));
-        g.fillEllipse (ledX - 2.0f, ledY - 2.0f, 4.0f, 4.0f);
+        g.fillEllipse (ledX - 1.5f, ledY - 1.5f, 3.0f, 3.0f);
 
-        g.setColour (juce::Colour (0xff10b981));
+        g.setColour (juce::Colour (0xfff1f5f9));
         g.setFont (juce::Font (11.0f, juce::Font::bold));
-        g.drawText ("EFECTO ACTIVO (ENGAGED)", 270, 444, 300, 16, juce::Justification::centred);
+        g.drawText ("EFECTO ENGANCHADO (ACTIVE)", 220, 424, 400, 16, juce::Justification::centred);
     }
     else
     {
         g.setColour (juce::Colour (0x33ef4444));
         g.fillEllipse (ledX - 10.0f, ledY - 10.0f, 20.0f, 20.0f);
         g.setColour (juce::Colour (0xffef4444));
-        g.fillEllipse (ledX - 6.0f, ledY - 6.0f, 12.0f, 12.0f);
+        g.fillEllipse (ledX - 5.0f, ledY - 5.0f, 10.0f, 10.0f);
 
-        g.setColour (juce::Colour (0xffef4444));
+        g.setColour (juce::Colour (0xfff87171));
         g.setFont (juce::Font (11.0f, juce::Font::bold));
-        g.drawText ("BYPASS (DIRECTO)", 270, 444, 300, 16, juce::Justification::centred);
+        g.drawText ("BYPASS (DIRECTO)", 220, 424, 400, 16, juce::Justification::centred);
     }
+
+    // Escalas de dB bajo los faders horizontales
+    g.setColour (juce::Colour (0xff64748b));
+    g.setFont (juce::Font (9.0f, juce::Font::plain));
+    // Fader Ganancia Entrada
+    g.drawText ("-24dB", 42, 508, 50, 12, juce::Justification::centredLeft);
+    g.drawText ("0dB", 160, 508, 50, 12, juce::Justification::centred);
+    g.drawText ("+24dB", 272, 508, 55, 12, juce::Justification::centredRight);
+    // Fader Volumen Salida
+    g.drawText ("-24dB", 515, 508, 50, 12, juce::Justification::centredLeft);
+    g.drawText ("0dB", 633, 508, 50, 12, juce::Justification::centred);
+    g.drawText ("+24dB", 745, 508, 55, 12, juce::Justification::centredRight);
 
     g.setColour (juce::Colour (0xff64748b));
     g.setFont (juce::Font (9.0f, juce::Font::bold));
@@ -447,7 +519,7 @@ void PitchShiftAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.setColour (juce::Colour (0xff475569));
     g.setFont (juce::Font (10.0f, juce::Font::plain));
-    g.drawText ("AUDIOCRAFT DSP • VST3 / STANDALONE", 540, 535, 260, 16, juce::Justification::centredRight);
+    g.drawText ("AUDIOCRAFT DSP • VST3 / STANDALONE", 540, 538, 260, 16, juce::Justification::centredRight);
 }
 
 void PitchShiftAudioProcessorEditor::resized()
@@ -463,27 +535,34 @@ void PitchShiftAudioProcessorEditor::resized()
         startX += btnW + 3;
     }
 
-    int knobStartX = 24;
-    int colWidth = 99;
-    juce::Slider* sliders[] = { &inputGainSlider, &semitonesSlider, &centsSlider, &mixSlider, &lowCutSlider, &highCutSlider, &gateSlider, &outputGainSlider };
-    juce::Label* labels[]   = { &inputGainLabel, &semitonesLabel, &centsLabel, &mixLabel, &lowCutLabel, &highCutLabel, &gateLabel, &outputGainLabel };
+    // 6 Potenciómetros superiores en el panel principal
+    int knobStartX = 28;
+    int colWidth = 130;
+    juce::Slider* sliders[] = { &semitonesSlider, &centsSlider, &mixSlider, &lowCutSlider, &highCutSlider, &gateSlider };
+    juce::Label* labels[]   = { &semitonesLabel, &centsLabel, &mixLabel, &lowCutLabel, &highCutLabel, &gateLabel };
 
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 6; ++i)
     {
         int x = knobStartX + i * colWidth;
         labels[i]->setBounds (x, 216, colWidth, 18);
-        sliders[i]->setBounds (x + (colWidth - 78) / 2, 236, 78, 95);
+        sliders[i]->setBounds (x + (colWidth - 85) / 2, 236, 85, 95);
     }
 
-    // Botones de ajuste fino bajo Semitonos (Columna 1)
-    int semiColX = knobStartX + 1 * colWidth;
-    semitoneDownBtn.setBounds (semiColX + 5, 342, 28, 22);
-    semitoneZeroBtn.setBounds (semiColX + 35, 342, 28, 22);
-    semitoneUpBtn.setBounds   (semiColX + 65, 342, 28, 22);
+    // Botones de ajuste fino bajo Semitonos (Columna 0)
+    semitoneDownBtn.setBounds (knobStartX + 18, 342, 28, 22);
+    semitoneZeroBtn.setBounds (knobStartX + 51, 342, 28, 22);
+    semitoneUpBtn.setBounds   (knobStartX + 84, 342, 28, 22);
 
-    // Botón Puerta de Ruido bajo Gate (Columna 6)
-    int gateColX = knobStartX + 6 * colWidth;
-    gateToggleBtn.setBounds (gateColX + 6, 342, colWidth - 12, 22);
+    // Botón Puerta de Ruido bajo Gate (Columna 5)
+    int gateColX = knobStartX + 5 * colWidth;
+    gateToggleBtn.setBounds (gateColX + 16, 342, 98, 22);
 
-    bypassFootswitch.setBounds (420 - 35, 475, 70, 58);
+    // Panel Inferior: Fader Entrada (izq), Footswitch Bypass (centro), Fader Salida (der)
+    inputGainLabel.setBounds (42, 450, 190, 18);
+    inputGainSlider.setBounds (40, 470, 285, 34);
+
+    bypassFootswitch.setBounds (420 - 32, 454, 64, 62);
+
+    outputGainLabel.setBounds (515, 450, 190, 18);
+    outputGainSlider.setBounds (513, 470, 285, 34);
 }

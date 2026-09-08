@@ -14,6 +14,10 @@ public:
                            float sliderPos, float rotaryStartAngle, float rotaryEndAngle,
                            juce::Slider& slider) override;
 
+    void drawLinearSlider (juce::Graphics& g, int x, int y, int width, int height,
+                           float sliderPos, float minSliderPos, float maxSliderPos,
+                           const juce::Slider::SliderStyle, juce::Slider& slider) override;
+
     void drawButtonBackground (juce::Graphics& g, juce::Button& button,
                                const juce::Colour& backgroundColour,
                                bool shouldDrawButtonAsHighlighted,
@@ -40,24 +44,27 @@ private:
     PitchShiftAudioProcessor& audioProcessor;
     CustomPedalLookAndFeel customLookAndFeel;
 
-    // Sliders principales (8 potenciómetros hardware)
-    juce::Slider inputGainSlider;
+    // Potenciómetros superiores (6 controles rotatorios)
     juce::Slider semitonesSlider;
     juce::Slider centsSlider;
     juce::Slider mixSlider;
     juce::Slider lowCutSlider;
     juce::Slider highCutSlider;
     juce::Slider gateSlider;
+
+    // Faders lineales inferiores (Entrada y Salida)
+    juce::Slider inputGainSlider;
     juce::Slider outputGainSlider;
 
-    // Etiquetas de los potenciómetros
-    juce::Label inputGainLabel;
+    // Etiquetas
     juce::Label semitonesLabel;
     juce::Label centsLabel;
     juce::Label mixLabel;
     juce::Label lowCutLabel;
     juce::Label highCutLabel;
     juce::Label gateLabel;
+
+    juce::Label inputGainLabel;
     juce::Label outputGainLabel;
 
     // Botones de ajuste fino semitono (-1, 0, +1)
