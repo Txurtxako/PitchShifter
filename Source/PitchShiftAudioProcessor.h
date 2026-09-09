@@ -39,12 +39,14 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
 private:
-    // DSP Pitch Shifting Circular Buffer
+    // DSP Pitch Shifting Circular Buffer con WSOLA (Waveform Similarity Overlap-Add)
     std::vector<float> delayBufferL;
     std::vector<float> delayBufferR;
     int writePointer = 0;
     double phase0 = 0.0;
     double phase1 = 0.5;
+    double delay0 = 400.0;
+    double delay1 = 1200.0;
 
     // Filtros de corte 12 dB/octava (Butterworth Q = 0.7071) Direct Form II Transposed
     float lowCutZ1L = 0.0f, lowCutZ2L = 0.0f;
