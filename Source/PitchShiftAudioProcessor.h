@@ -39,14 +39,16 @@ public:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
 private:
-    // DSP Pitch Shifting Circular Buffer con WSOLA (Waveform Similarity Overlap-Add)
+    // DSP Pitch Shifting: Single-Stream Zero-Crossing Phase-Matched Splicing (sin chorus ni detuner)
     std::vector<float> delayBufferL;
     std::vector<float> delayBufferR;
     int writePointer = 0;
-    double phase0 = 0.0;
-    double phase1 = 0.5;
-    double delay0 = 400.0;
-    double delay1 = 1200.0;
+    double readPos = 0.0;
+    bool isSplicing = false;
+    double spliceFadeReadPos = 0.0;
+    int spliceProgress = 0;
+    int spliceLengthSamples = 144;
+    bool initializedReadPos = false;
 
     // Filtros de corte 12 dB/octava (Butterworth Q = 0.7071) Direct Form II Transposed
     float lowCutZ1L = 0.0f, lowCutZ2L = 0.0f;
@@ -54,8 +56,10 @@ private:
     float highCutZ1L = 0.0f, highCutZ2L = 0.0f;
     float highCutZ1R = 0.0f, highCutZ2R = 0.0f;
 
-    // Puerta de ruido
+    // Puerta de ruido con histéresis y tiempo de sostenimiento (Hold Time)
     float gateEnvelope = 0.0f;
+    int gateHoldCounter = 0;
+    bool gateOpen = false;
 
     double currentSampleRate = 44100.0;
 

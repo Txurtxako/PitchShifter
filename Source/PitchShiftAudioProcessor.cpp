@@ -84,14 +84,21 @@ void PitchShiftAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     delayBufferL.assign (bufferSize, 0.0f);
     delayBufferR.assign (bufferSize, 0.0f);
     writePointer = 0;
-    phase0 = 0.0;
-    phase1 = 0.5;
-    delay0 = 400.0;
-    delay1 = 1200.0;
+    readPos = 0.0;
+    isSplicing = false;
+    spliceFadeReadPos = 0.0;
+    spliceProgress = 0;
+    initializedReadPos = false;
 
     lowCutZ1L = lowCutZ2L = lowCutZ1R = lowCutZ2R = 0.0f;
     highCutZ1L = highCutZ2L = highCutZ1R = highCutZ2R = 0.0f;
     gateEnvelope = 0.0f;
+    gateHoldCounter = 0;
+    gateOpen = false;
+
+    // Reportar latencia nominal al DAW (Compensación de retardo PDC en Cubase, Reaper, etc.)
+    const int nominalLatency = (int) std::round (currentSampleRate * 0.016);
+    setLatencySamples (nominalLatency);
 }
 
 void PitchShiftAudioProcessor::releaseResources()
@@ -188,40 +195,35 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
     const double totalSemitones = (double) semitones + ((double) cents / 100.0);
     const double pitchRatio = std::pow (2.0, totalSemitones / 12.0);
 
-    // Ajuste de tamaño de ventana: Modo Bajo (95ms) vs Modo Guitarra (42ms)
+    // Ajuste de límites operativos para flujo único sin chorus
     const bool isBass = (mode == 1);
-    const double grainSeconds = isBass ? 0.095 : 0.042;
-    const int grainSize = (int)(currentSampleRate * grainSeconds);
-
-    const double phaseRate = 1.0 / (double) grainSize;
-    const double delayDelta = 1.0 - pitchRatio;
+    const int nominalDelay = (int) std::round (currentSampleRate * (isBass ? 0.035 : 0.016));
+    const int windowSamples = (int) std::round (currentSampleRate * (isBass ? 0.030 : 0.014));
+    const int minDelay = (int) std::round (currentSampleRate * (isBass ? 0.006 : 0.003));
+    const int maxDelay = nominalDelay + windowSamples;
+    const int searchRadius = isBass ? 128 : 64;
 
     const int delayBufLen = (int) delayBufferL.size();
     auto* channelL = buffer.getWritePointer (0);
     auto* channelR = (numChannels > 1) ? buffer.getWritePointer (1) : channelL;
 
-    // Función de ventana Blackman-Harris de 4 términos (-92 dB de rechazo de lóbulos para eliminar ondulación y batido)
-    auto blackmanHarris = [] (double phase) noexcept -> float
-    {
-        if (phase <= 0.0 || phase >= 1.0) return 0.0f;
-        const double theta = 2.0 * juce::MathConstants<double>::pi * phase;
-        const double w = 0.35875 - 0.48829 * std::cos (theta)
-                                 + 0.14128 * std::cos (2.0 * theta)
-                                 - 0.01168 * std::cos (3.0 * theta);
-        return (float) std::max (0.0, w);
-    };
+    // Dinámica de puerta de ruido musical de estudio: 2ms ataque, 90ms caída exponencial natural, 25ms sostenimiento (hold), 5dB histéresis
+    const float attackCoeff = 1.0f - std::exp (-1.0f / (float)(currentSampleRate * 0.002));
+    const float releaseCoeff = 1.0f - std::exp (-1.0f / (float)(currentSampleRate * 0.090));
+    const int holdSamples = (int)(currentSampleRate * 0.025);
+    const float hysteresisDb = 5.0f;
 
     // Interpolador cúbico Hermite de 4 puntos (mantiene agudos nítidos sin aliasing ni filtrado paso bajo)
     auto hermiteInterpolate = [] (const std::vector<float>& buf, double pos, int len) noexcept -> float
     {
-        const int i1 = (int) pos;
+        const int i1 = (int) std::floor (pos);
         const float frac = (float)(pos - (double) i1);
         const int i0 = (i1 - 1 + len) % len;
         const int i2 = (i1 + 1) % len;
         const int i3 = (i1 + 2) % len;
 
         const float y0 = buf[i0];
-        const float y1 = buf[i1 % len];
+        const float y1 = buf[((i1 % len) + len) % len];
         const float y2 = buf[i2];
         const float y3 = buf[i3];
 
@@ -233,55 +235,39 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
         return ((c3 * frac + c2) * frac + c1) * frac + c0;
     };
 
-    // Cálculo de retardo nominal para el grano que reinicia
-    auto calcNominalDelay = [] (double otherDelay, int gSize, double pRatio, int bLen) noexcept -> double
+    // Búsqueda de coincidencia de fase y paso por cero en micro-empalme
+    auto findPhaseMatch = [&] (double currPos, double targetPos, int radius) noexcept -> double
     {
-        const double minDelay = 64.0;
-        const double maxDelay = (double)(bLen - gSize - 256);
+        const int currIdx = (int) std::floor (currPos);
+        const int currPrev = (currIdx - 1 + delayBufLen) % delayBufLen;
+        const float currVal = delayBufferL[((currIdx % delayBufLen) + delayBufLen) % delayBufLen];
+        const float currSlope = currVal - delayBufferL[currPrev];
 
-        double target = otherDelay - ((double) gSize * 0.5 * (1.0 - pRatio));
-        if (target < minDelay)
-            target = minDelay + std::abs ((double) gSize * 0.25);
-        else if (target > maxDelay)
-            target = maxDelay - std::abs ((double) gSize * 0.25);
-        return target;
-    };
+        const int targetIdx = (int) std::floor (targetPos);
+        int bestIdx = targetIdx;
+        float minScore = 1.0e12f;
 
-    // Búsqueda de alineación de fase por correlación WSOLA (Waveform Similarity Overlap-Add)
-    // Encuentra el desfase exacto donde la forma de onda del grano entrante coincide en fase con el grano activo
-    auto findWsolaAlignment = [&] (double nominalTarget, double activeDelay, int bLen, bool bassMode) noexcept -> double
-    {
-        const int searchRadius = bassMode ? 160 : 96;
-        const int templateLen = 32;
-
-        const int refPos = ((writePointer - (int) activeDelay) % bLen + bLen * 4) % bLen;
-        int bestDelta = 0;
-        float minDifference = 1.0e12f;
-
-        const int minOffset = std::max (64, (int) std::floor (nominalTarget - (double) searchRadius));
-        const int maxOffset = std::min (bLen - templateLen - 64, (int) std::floor (nominalTarget + (double) searchRadius));
-
-        for (int candOffset = minOffset; candOffset <= maxOffset; candOffset += 2)
+        for (int offset = -radius; offset <= radius; ++offset)
         {
-            const int candPos = ((writePointer - candOffset) % bLen + bLen * 4) % bLen;
-            float diff = 0.0f;
+            const int candIdx = (targetIdx + offset + delayBufLen * 16) % delayBufLen;
+            const int candPrev = (candIdx - 1 + delayBufLen) % delayBufLen;
+            const float candVal = delayBufferL[candIdx];
+            const float candSlope = candVal - delayBufferL[candPrev];
 
-            for (int m = 0; m < templateLen; m += 2)
-            {
-                const float sRef = delayBufferL[(refPos - m + bLen) % bLen];
-                const float sCand = delayBufferL[(candPos - m + bLen) % bLen];
-                const float d = sRef - sCand;
-                diff += d * d;
-            }
+            const float slopeMismatch = (currSlope * candSlope < 0.0f) ? 2.0f : 0.0f;
+            const float valDiff = std::abs (candVal - currVal);
+            const float slopeDiff = std::abs (candSlope - currSlope);
 
-            if (diff < minDifference)
+            const float score = valDiff + slopeDiff * 2.0f + slopeMismatch;
+            if (score < minScore)
             {
-                minDifference = diff;
-                bestDelta = candOffset - (int) nominalTarget;
+                minScore = score;
+                bestIdx = candIdx;
             }
         }
 
-        return nominalTarget + (double) bestDelta;
+        const double frac = currPos - (double) currIdx;
+        return (double)((bestIdx + delayBufLen * 16) % delayBufLen) + frac;
     };
 
     for (int i = 0; i < numSamples; ++i)
@@ -290,70 +276,110 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
         const float inL = channelL[i] * inGainLin;
         const float inR = channelR[i] * inGainLin;
 
-        // 2. Puerta de ruido
+        // 2. Puerta de ruido musical con histéresis y tiempo de sostenimiento (Hold Time)
         if (gateOn)
         {
             const float peak = std::max (std::abs (inL), std::abs (inR));
             const float peakDb = (peak > 0.00001f) ? 20.0f * std::log10 (peak) : -100.0f;
-            const float targetGain = (peakDb >= gateThreshDb) ? 1.0f : 0.0f;
-            gateEnvelope += (targetGain - gateEnvelope) * (targetGain > gateEnvelope ? 0.4f : 0.02f);
+
+            if (peakDb >= gateThreshDb)
+            {
+                gateHoldCounter = holdSamples;
+                gateOpen = true;
+            }
+            else if (peakDb < (gateThreshDb - hysteresisDb) && gateHoldCounter <= 0)
+            {
+                gateOpen = false;
+            }
+
+            if (gateHoldCounter > 0)
+                gateHoldCounter--;
+
+            const float targetGain = gateOpen ? 1.0f : 0.0f;
+            const float coeff = (targetGain > gateEnvelope) ? attackCoeff : releaseCoeff;
+            gateEnvelope += (targetGain - gateEnvelope) * coeff;
         }
         else
         {
             gateEnvelope = 1.0f;
+            gateOpen = true;
+            gateHoldCounter = 0;
         }
 
-        float sigL = inL * gateEnvelope;
-        float sigR = inR * gateEnvelope;
+        const float sigL = inL * gateEnvelope;
+        const float sigR = inR * gateEnvelope;
 
         // 3. Escritura al buffer circular (señal directa post-puerta)
         delayBufferL[writePointer] = sigL;
         delayBufferR[writePointer] = sigR;
 
-        // 4. Avance de retardos de grano y fases WSOLA
-        delay0 += delayDelta;
-        delay1 += delayDelta;
-
-        phase0 += phaseRate;
-        phase1 += phaseRate;
-
-        // Reset y alineación de fase por correlación para Grano 0
-        if (phase0 >= 1.0)
+        // 4. Inicializar puntero de lectura en primera ejecución
+        if (!initializedReadPos)
         {
-            phase0 -= 1.0;
-            const double nominalTarget = calcNominalDelay (delay1, grainSize, pitchRatio, delayBufLen);
-            delay0 = findWsolaAlignment (nominalTarget, delay1, delayBufLen, isBass);
+            readPos = (double)((writePointer - nominalDelay + delayBufLen * 16) % delayBufLen);
+            initializedReadPos = true;
         }
 
-        // Reset y alineación de fase por correlación para Grano 1
-        if (phase1 >= 1.0)
+        // 5. Control de flujo único y micro-empalme en paso por cero
+        double currentDelay = std::fmod ((double) writePointer - readPos + (double)(delayBufLen * 16), (double) delayBufLen);
+
+        if (!isSplicing)
         {
-            phase1 -= 1.0;
-            const double nominalTarget = calcNominalDelay (delay0, grainSize, pitchRatio, delayBufLen);
-            delay1 = findWsolaAlignment (nominalTarget, delay0, delayBufLen, isBass);
+            if (pitchRatio < 0.9999 && currentDelay >= (double) maxDelay)
+            {
+                const double targetPos = std::fmod ((double) writePointer - (double) nominalDelay + (double)(delayBufLen * 16), (double) delayBufLen);
+                const double matchedPos = findPhaseMatch (readPos, targetPos, searchRadius);
+                isSplicing = true;
+                spliceFadeReadPos = readPos;
+                readPos = matchedPos;
+                spliceProgress = 0;
+            }
+            else if (pitchRatio > 1.0001 && currentDelay <= (double) minDelay)
+            {
+                const double targetPos = std::fmod ((double) writePointer - (double) nominalDelay + (double)(delayBufLen * 16), (double) delayBufLen);
+                const double matchedPos = findPhaseMatch (readPos, targetPos, searchRadius);
+                isSplicing = true;
+                spliceFadeReadPos = readPos;
+                readPos = matchedPos;
+                spliceProgress = 0;
+            }
         }
 
-        // 5. Ponderación con ventana Blackman-Harris de 4 términos (-92 dB sidelobes)
-        const float rawW0 = blackmanHarris (phase0);
-        const float rawW1 = blackmanHarris (phase1);
-        const float sumW = rawW0 + rawW1 + 1.0e-9f;
-        const float w0 = rawW0 / sumW;
-        const float w1 = rawW1 / sumW;
+        // 6. Lectura de señal procesada (Wet)
+        float wetL = 0.0f;
+        float wetR = 0.0f;
 
-        // 6. Lectura de muestras con interpolación cúbica Hermite de 4 puntos
-        const double readPos0 = std::fmod ((double) writePointer - delay0 + (double)(delayBufLen * 4), (double) delayBufLen);
-        const double readPos1 = std::fmod ((double) writePointer - delay1 + (double)(delayBufLen * 4), (double) delayBufLen);
+        if (isSplicing)
+        {
+            // Micro-cruce suave de 3ms en fase idéntica
+            const float progress = (float) spliceProgress / (float) spliceLengthSamples;
+            const float wOut = 0.5f * (1.0f + std::cos (juce::MathConstants<float>::pi * progress));
+            const float wIn  = 0.5f * (1.0f - std::cos (juce::MathConstants<float>::pi * progress));
 
-        const float val0L = hermiteInterpolate (delayBufferL, readPos0, delayBufLen);
-        const float val0R = hermiteInterpolate (delayBufferR, readPos0, delayBufLen);
-        const float val1L = hermiteInterpolate (delayBufferL, readPos1, delayBufLen);
-        const float val1R = hermiteInterpolate (delayBufferR, readPos1, delayBufLen);
+            const float oldL = hermiteInterpolate (delayBufferL, spliceFadeReadPos, delayBufLen);
+            const float oldR = hermiteInterpolate (delayBufferR, spliceFadeReadPos, delayBufLen);
+            const float newL = hermiteInterpolate (delayBufferL, readPos, delayBufLen);
+            const float newR = hermiteInterpolate (delayBufferR, readPos, delayBufLen);
 
-        // 7. Suma solapada en fase perfecta: sin filtro de peine ni modulación chorus
-        float wetL = val0L * w0 + val1L * w1;
-        float wetR = val0R * w0 + val1R * w1;
+            wetL = oldL * wOut + newL * wIn;
+            wetR = oldR * wOut + newR * wIn;
 
-        // 4. Filtros Corte de Graves y Corte de Agudos (APLICADOS EXCLUSIVAMENTE A LA SEÑAL WET, EL DRY QUEDA INTACTO)
+            spliceFadeReadPos = std::fmod (spliceFadeReadPos + pitchRatio + (double)(delayBufLen * 16), (double) delayBufLen);
+            spliceProgress++;
+            if (spliceProgress >= spliceLengthSamples)
+                isSplicing = false;
+        }
+        else
+        {
+            // 98% DEL TIEMPO: UN SOLO CANAL ACTIVO. CERO CHORUS, CERO DETUNER, TONO 100% PURO
+            wetL = hermiteInterpolate (delayBufferL, readPos, delayBufLen);
+            wetR = hermiteInterpolate (delayBufferR, readPos, delayBufLen);
+        }
+
+        // Avance continuo del puntero principal a velocidad de pitch
+        readPos = std::fmod (readPos + pitchRatio + (double)(delayBufLen * 16), (double) delayBufLen);
+
+        // 7. Filtros Corte de Graves y Corte de Agudos (APLICADOS EXCLUSIVAMENTE A LA SEÑAL WET, EL DRY QUEDA INTACTO)
         if (hasLowCut)
         {
             float yL = lowB0 * wetL + lowCutZ1L;
@@ -388,14 +414,19 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
             wetR = yR;
         }
 
-        // 5. Mezcla Dry/Wet con ley de potencia constante (Dry sin alteración espectral)
+        // 8. COMPENSACIÓN DE LATENCIA DRY / WET
+        const double dryReadPos = std::fmod ((double) writePointer - (double) nominalDelay + (double)(delayBufLen * 16), (double) delayBufLen);
+        const float dryL = hermiteInterpolate (delayBufferL, dryReadPos, delayBufLen);
+        const float dryR = hermiteInterpolate (delayBufferR, dryReadPos, delayBufLen);
+
+        // 9. Mezcla Dry/Wet con ley de potencia constante
         const float dryWeight = std::cos (mix * 0.5f * juce::MathConstants<float>::pi);
         const float wetWeight = std::sin (mix * 0.5f * juce::MathConstants<float>::pi);
 
-        float mixedL = sigL * dryWeight + wetL * wetWeight;
-        float mixedR = sigR * dryWeight + wetR * wetWeight;
+        float mixedL = dryL * dryWeight + wetL * wetWeight;
+        float mixedR = dryR * dryWeight + wetR * wetWeight;
 
-        // 6. Ganancia de salida y asignación al buffer
+        // 10. Ganancia de salida y asignación al buffer
         channelL[i] = mixedL * outGainLin;
         channelR[i] = mixedR * outGainLin;
 
