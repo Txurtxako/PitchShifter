@@ -97,7 +97,7 @@ void PitchShiftAudioProcessor::prepareToPlay (double sampleRate, int samplesPerB
     gateOpen = false;
 
     // Reportar latencia nominal al DAW (Compensación de retardo PDC en Cubase, Reaper, etc.)
-    const int nominalLatency = (int) std::round (currentSampleRate * 0.016);
+    const int nominalLatency = (int) std::round (currentSampleRate * 0.024);
     setLatencySamples (nominalLatency);
 }
 
@@ -197,11 +197,12 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
 
     // Ajuste de límites operativos para flujo único sin chorus
     const bool isBass = (mode == 1);
-    const int nominalDelay = (int) std::round (currentSampleRate * (isBass ? 0.035 : 0.016));
-    const int windowSamples = (int) std::round (currentSampleRate * (isBass ? 0.030 : 0.014));
-    const int minDelay = (int) std::round (currentSampleRate * (isBass ? 0.006 : 0.003));
+    const int nominalDelay = (int) std::round (currentSampleRate * (isBass ? 0.040 : 0.024));
+    const int windowSamples = (int) std::round (currentSampleRate * (isBass ? 0.035 : 0.022));
+    const int minDelay = (int) std::round (currentSampleRate * (isBass ? 0.008 : 0.004));
     const int maxDelay = nominalDelay + windowSamples;
-    const int searchRadius = isBass ? 128 : 64;
+    const int searchRadius = isBass ? 576 : 384;
+    spliceLengthSamples = (int) std::round (currentSampleRate * (isBass ? 0.013 : 0.0075));
 
     const int delayBufLen = (int) delayBufferL.size();
     auto* channelL = buffer.getWritePointer (0);
@@ -235,39 +236,68 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
         return ((c3 * frac + c2) * frac + c1) * frac + c0;
     };
 
-    // Búsqueda de coincidencia de fase y paso por cero en micro-empalme
-    auto findPhaseMatch = [&] (double currPos, double targetPos, int radius) noexcept -> double
+    // Búsqueda de coincidencia de fase y periodo por correlación cruzada de plantilla normalizada (Cross-Correlation)
+    auto findPhaseMatch = [&] (double currPos, double targetPos, int radius, bool bassMode) noexcept -> double
     {
+        const int templateLen = bassMode ? 48 : 32;
         const int currIdx = (int) std::floor (currPos);
-        const int currPrev = (currIdx - 1 + delayBufLen) % delayBufLen;
-        const float currVal = delayBufferL[((currIdx % delayBufLen) + delayBufLen) % delayBufLen];
-        const float currSlope = currVal - delayBufferL[currPrev];
-
         const int targetIdx = (int) std::floor (targetPos);
-        int bestIdx = targetIdx;
-        float minScore = 1.0e12f;
 
-        for (int offset = -radius; offset <= radius; ++offset)
+        int bestOffset = 0;
+        float minDifference = 1.0e12f;
+
+        // Búsqueda gruesa con paso de 2 muestras
+        for (int offset = -radius; offset <= radius; offset += 2)
         {
             const int candIdx = (targetIdx + offset + delayBufLen * 16) % delayBufLen;
-            const int candPrev = (candIdx - 1 + delayBufLen) % delayBufLen;
-            const float candVal = delayBufferL[candIdx];
-            const float candSlope = candVal - delayBufferL[candPrev];
+            float diff = 0.0f;
 
-            const float slopeMismatch = (currSlope * candSlope < 0.0f) ? 2.0f : 0.0f;
-            const float valDiff = std::abs (candVal - currVal);
-            const float slopeDiff = std::abs (candSlope - currSlope);
-
-            const float score = valDiff + slopeDiff * 2.0f + slopeMismatch;
-            if (score < minScore)
+            for (int m = 0; m < templateLen; m += 2)
             {
-                minScore = score;
-                bestIdx = candIdx;
+                const float sRef = delayBufferL[(currIdx - m + delayBufLen * 16) % delayBufLen];
+                const float sCand = delayBufferL[(candIdx - m + delayBufLen * 16) % delayBufLen];
+                const float d = sRef - sCand;
+                diff += d * d;
+            }
+
+            const float penalty = 1.0f + ((float) std::abs (offset) / (float) radius) * 0.05f;
+            const float score = diff * penalty;
+
+            if (score < minDifference)
+            {
+                minDifference = score;
+                bestOffset = offset;
+            }
+        }
+
+        // Búsqueda fina con paso de 1 muestra alrededor del óptimo
+        const int fineStart = std::max (-radius, bestOffset - 3);
+        const int fineEnd = std::min (radius, bestOffset + 3);
+        for (int offset = fineStart; offset <= fineEnd; ++offset)
+        {
+            const int candIdx = (targetIdx + offset + delayBufLen * 16) % delayBufLen;
+            float diff = 0.0f;
+
+            for (int m = 0; m < templateLen; ++m)
+            {
+                const float sRef = delayBufferL[(currIdx - m + delayBufLen * 16) % delayBufLen];
+                const float sCand = delayBufferL[(candIdx - m + delayBufLen * 16) % delayBufLen];
+                const float d = sRef - sCand;
+                diff += d * d;
+            }
+
+            const float penalty = 1.0f + ((float) std::abs (offset) / (float) radius) * 0.05f;
+            const float score = diff * penalty;
+
+            if (score < minDifference)
+            {
+                minDifference = score;
+                bestOffset = offset;
             }
         }
 
         const double frac = currPos - (double) currIdx;
-        return (double)((bestIdx + delayBufLen * 16) % delayBufLen) + frac;
+        return (double)((targetIdx + bestOffset + delayBufLen * 16) % delayBufLen) + frac;
     };
 
     for (int i = 0; i < numSamples; ++i)
@@ -328,7 +358,7 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
             if (pitchRatio < 0.9999 && currentDelay >= (double) maxDelay)
             {
                 const double targetPos = std::fmod ((double) writePointer - (double) nominalDelay + (double)(delayBufLen * 16), (double) delayBufLen);
-                const double matchedPos = findPhaseMatch (readPos, targetPos, searchRadius);
+                const double matchedPos = findPhaseMatch (readPos, targetPos, searchRadius, isBass);
                 isSplicing = true;
                 spliceFadeReadPos = readPos;
                 readPos = matchedPos;
@@ -337,7 +367,7 @@ void PitchShiftAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, j
             else if (pitchRatio > 1.0001 && currentDelay <= (double) minDelay)
             {
                 const double targetPos = std::fmod ((double) writePointer - (double) nominalDelay + (double)(delayBufLen * 16), (double) delayBufLen);
-                const double matchedPos = findPhaseMatch (readPos, targetPos, searchRadius);
+                const double matchedPos = findPhaseMatch (readPos, targetPos, searchRadius, isBass);
                 isSplicing = true;
                 spliceFadeReadPos = readPos;
                 readPos = matchedPos;
